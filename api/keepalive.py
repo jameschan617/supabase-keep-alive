@@ -42,15 +42,50 @@ except Exception as e:
 # =============================
 # 工具函数
 # =============================
-def _perform_ping(conf: Dict[str, Any]):
-    """对指定配置执行 keep‑alive 查询，返回 (success: bool, msg: str)"""
+def _perform_ping(conf: dict) -> tuple[bool, str]:
     try:
-        supa: Client = create_client(conf["supabase_url"], conf["supabase_key"])
-        # 只做一次轻量查询
-        supa.table(conf["table_name"]).select("*").limit(1).execute()
-        return True, "ok"
+        # 初始化 Supabase 客户端
+        supabase = create_client(conf["supabase_url"], conf["supabase_key"])
+        
+        # 1. 查询所有 schema（排除系统内置 schema）
+        schemas_response = supabase.sql("""
+            SELECT schema_name 
+            FROM information_schema.schemata 
+            WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+        """).execute()
+        
+        schemas = [row["schema_name"] for row in schemas_response.data]
+        if not schemas:
+            return False, f"No schemas found for {conf['name']}"
+        
+        # 2. 遍历每个 schema，查询其中的表
+        all_tables = {}
+        for schema in schemas:
+            tables_response = supabase.sql(f"""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'
+            """).execute()
+            
+            tables = [row["table_name"] for row in tables_response.data]
+            if tables:
+                all_tables[schema] = tables
+        
+        if not all_tables:
+            return False, f"No tables found in any schema for {conf['name']}"
+        
+        # 3. 选择第一个找到的表执行轻量查询
+        first_schema = next(iter(all_tables.keys()))
+        first_table = all_tables[first_schema][0]
+        
+        response = supabase.table(f"{first_schema}.{first_table}").select("*", count="exact").limit(1).execute()
+        
+        # 构建包含所有 schema 和表的信息
+        schema_info = ", ".join([f"{s}: [{', '.join(ts)}]" for s, ts in all_tables.items()])
+        return True, f"Pinged {conf['name']} (schemas and tables: {schema_info}) successfully"
+    
     except Exception as e:
-        return False, str(e)
+        return False, f"Error pinging {conf['name']}: {str(e)}"
 
 
 def _get_conf_by_index(idx: int):
