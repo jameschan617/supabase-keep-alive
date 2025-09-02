@@ -28,7 +28,7 @@ try:
         raise ValueError("SUPABASE_CONFIG 不能为空数组")
 
     # 校验每一项的必要字段
-    required_fields = {"name", "supabase_url", "supabase_key", "table_name"}
+    required_fields = {"name", "supabase_url", "supabase_key"}
     for idx, conf in enumerate(config_list):
         missing = required_fields - conf.keys()
         if missing:
